@@ -8,19 +8,48 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc" }}>
-      <div
-        style={{
-          maxWidth: 1152,
-          margin: "0 auto",
-          padding: 24,
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ fontWeight: 800, color: "#0f172a" }}>Delivery Route App</div>
-        <div style={{ display: "flex", gap: 12 }}>
+      <style>{`
+        .app-header {
+          max-width: 1152px;
+          margin: 0 auto;
+          padding: 24px;
+          display: flex;
+          gap: 12px;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+        }
+        .app-header-brand {
+          font-weight: 800;
+          color: #0f172a;
+          border: 1px solid #2563eb;
+          background: #ffffff;
+          padding: 10px 14px;
+          border-radius: 12px;
+        }
+        .app-header-buttons {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        @media (max-width: 640px) {
+          .app-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .app-header-buttons {
+            width: 100%;
+            justify-content: flex-start;
+          }
+          .app-header-buttons button {
+            width: 100%;
+          }
+        }
+      `}</style>
+      <div className="app-header">
+        <div className="app-header-brand">Test Applications</div>
+        <div className="app-header-buttons">
           <button
             type="button"
             onClick={() => setView("route")}
