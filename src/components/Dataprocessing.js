@@ -12,12 +12,9 @@ import {
   Database,
   FileSpreadsheet,
   RefreshCw,
-  Download,
   FileJson,
   FileType,
-  ChevronRight,
   Zap,
-  Layout
 } from 'lucide-react';
 
 // --- External Library Loader Hook ---
@@ -50,8 +47,9 @@ export default function DataProcessing() {
   const [status, setStatus] = useState({ type: 'info', message: 'Ready' });
 
   // Libraries for Excel and CSV
-  const xlsxStatus = useScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
-  const papaStatus = useScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js");
+  // Hook returns a status string, but we don't need to store it.
+  useScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  useScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js");
 
   const [config, setConfig] = useState([
     { id: '1', type: 'RENAME_COLUMN', params: { from: '', to: '' } }
