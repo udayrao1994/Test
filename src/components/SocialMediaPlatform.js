@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Flame, Search, User, MessageSquare, Heart, Share2, TrendingUp, Hash, Bell, Menu, X } from 'lucide-react';
+import { Flame, Search, User, MessageSquare, Heart, Share2, TrendingUp, Bell } from 'lucide-react';
 
 // --- MOCK DATA ---
 const INITIAL_DATA = {
@@ -135,13 +135,6 @@ export default function SocialMediaPlatform() {
     display: 'grid',
     gridTemplateColumns: isMobile ? '1fr' : isTablet ? '1fr 1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: isMobile ? '16px' : '24px'
-  };
-
-  const searchContainerStyle = {
-    flexGrow: 1,
-    maxWidth: isMobile ? 'none' : '500px',
-    position: 'relative',
-    display: isMobile && searchQuery === '' ? 'none' : 'block' // Optionally hide on mobile if empty, but here we'll keep it visible
   };
 
   return (

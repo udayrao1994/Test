@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileUp, 
   Play, 
@@ -9,10 +9,7 @@ import {
   AlertCircle,
   Loader2,
   Settings2,
-  Info,
-  ChevronRight,
   Database,
-  Type,
   FileSpreadsheet,
   RefreshCw
 } from 'lucide-react';
@@ -47,8 +44,9 @@ export default function DataProcessing() {
   const [status, setStatus] = useState({ type: 'info', message: 'Ready for processing' });
 
   // Libraries for Excel and CSV
-  const xlsxStatus = useScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
-  const papaStatus = useScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js");
+  // We intentionally don't store the return values; calling the hook triggers script loading.
+  useScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  useScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js");
 
   const [config, setConfig] = useState([
     { id: '1', type: 'RENAME_COLUMN', params: { from: '', to: '' } }
