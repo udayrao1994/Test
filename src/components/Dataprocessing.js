@@ -11,7 +11,13 @@ import {
   Settings2,
   Database,
   FileSpreadsheet,
-  RefreshCw
+  RefreshCw,
+  Download,
+  FileJson,
+  FileType,
+  ChevronRight,
+  Zap,
+  Layout
 } from 'lucide-react';
 
 // --- External Library Loader Hook ---
@@ -41,12 +47,11 @@ export default function DataProcessing() {
   const [processedData, setProcessedData] = useState([]);
   const [headers, setHeaders] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [status, setStatus] = useState({ type: 'info', message: 'Ready for processing' });
+  const [status, setStatus] = useState({ type: 'info', message: 'Ready' });
 
   // Libraries for Excel and CSV
-  // We intentionally don't store the return values; calling the hook triggers script loading.
-  useScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
-  useScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js");
+  const xlsxStatus = useScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  const papaStatus = useScript("https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js");
 
   const [config, setConfig] = useState([
     { id: '1', type: 'RENAME_COLUMN', params: { from: '', to: '' } }
@@ -59,47 +64,36 @@ export default function DataProcessing() {
 
     setStatus({ type: 'info', message: 'Reading file...' });
 
-    if (extension === 'csv') {
-      if (typeof window.Papa === 'undefined') {
-        setStatus({ type: 'error', message: 'CSV parser not loaded' });
-        return;
+    const processResults = (data) => {
+      if (data && data.length > 0) {
+        const cols = Object.keys(data[0]);
+        setRawData(data);
+        setProcessedData(data);
+        setHeaders(cols);
+        setStatus({ type: 'success', message: `Loaded ${data.length.toLocaleString()} records` });
+      } else {
+        setStatus({ type: 'error', message: 'The file appears to be empty.' });
       }
+    };
+
+    if (extension === 'csv') {
+      if (typeof window.Papa === 'undefined') return;
       window.Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: (results) => {
-          if (results.data && results.data.length > 0) {
-            const cols = Object.keys(results.data[0]);
-            setRawData(results.data);
-            setProcessedData(results.data);
-            setHeaders(cols);
-            setStatus({ type: 'success', message: `Loaded ${results.data.length} rows successfully` });
-          }
-        },
-        error: (err) => setStatus({ type: 'error', message: 'CSV Error: ' + err.message })
+        complete: (results) => processResults(results.data),
+        error: (err) => setStatus({ type: 'error', message: err.message })
       });
     } else if (['xlsx', 'xls'].includes(extension)) {
-      if (typeof window.XLSX === 'undefined') {
-        setStatus({ type: 'error', message: 'Excel parser not loaded' });
-        return;
-      }
+      if (typeof window.XLSX === 'undefined') return;
       const reader = new FileReader();
       reader.onload = (evt) => {
         try {
-          const bstr = evt.target.result;
-          const wb = window.XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = window.XLSX.utils.sheet_to_json(ws);
-          if (data && data.length > 0) {
-            const cols = Object.keys(data[0]);
-            setRawData(data);
-            setProcessedData(data);
-            setHeaders(cols);
-            setStatus({ type: 'success', message: `Loaded ${data.length} rows successfully` });
-          }
+          const wb = window.XLSX.read(evt.target.result, { type: 'binary' });
+          const data = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+          processResults(data);
         } catch (err) {
-          setStatus({ type: 'error', message: 'Excel Error: ' + err.message });
+          setStatus({ type: 'error', message: err.message });
         }
       };
       reader.readAsBinaryString(file);
@@ -107,406 +101,501 @@ export default function DataProcessing() {
   };
 
   const runPipeline = () => {
-    if (rawData.length === 0) {
-      setStatus({ type: 'error', message: 'Please upload a data file first' });
-      return;
-    }
+    if (rawData.length === 0) return;
     setIsProcessing(true);
-    setStatus({ type: 'info', message: 'Processing pipeline steps...' });
+    setStatus({ type: 'info', message: 'Executing pipeline...' });
     
     setTimeout(() => {
       try {
         let result = JSON.parse(JSON.stringify(rawData));
         
         config.forEach(step => {
-          if (step.type === 'RENAME_COLUMN' && step.params.from && step.params.to) {
-            const { from, to } = step.params;
-            result = result.map(row => {
-              const newRow = { ...row };
-              if (from in newRow) {
-                newRow[to] = newRow[from];
-                delete newRow[from];
+          const { type, params } = step;
+          
+          switch (type) {
+            case 'RENAME_COLUMN':
+              if (params.from && params.to) {
+                result = result.map(row => {
+                  if (params.from in row) {
+                    row[params.to] = row[params.from];
+                    delete row[params.from];
+                  }
+                  return row;
+                });
               }
-              return newRow;
-            });
-          } else if (step.type === 'UPPERCASE' && step.params.column) {
-            const col = step.params.column;
-            result = result.map(row => ({
-              ...row,
-              [col]: row[col] ? String(row[col]).toUpperCase() : ''
-            }));
+              break;
+            case 'UPPERCASE':
+              if (params.column) {
+                result = result.map(row => ({
+                  ...row,
+                  [params.column]: row[params.column] ? String(row[params.column]).toUpperCase() : ''
+                }));
+              }
+              break;
+            case 'FIND_REPLACE':
+              if (params.column && params.find !== undefined) {
+                result = result.map(row => ({
+                  ...row,
+                  [params.column]: String(row[params.column] || '').replace(new RegExp(params.find, 'g'), params.replace || '')
+                }));
+              }
+              break;
+            case 'DELETE_COLUMN':
+              if (params.column) {
+                result = result.map(row => {
+                  const newRow = { ...row };
+                  delete newRow[params.column];
+                  return newRow;
+                });
+              }
+              break;
+            case 'PREFIX_SUFFIX':
+              if (params.column) {
+                result = result.map(row => ({
+                  ...row,
+                  [params.column]: `${params.prefix || ''}${row[params.column] || ''}${params.suffix || ''}`
+                }));
+              }
+              break;
+            default: break;
           }
         });
 
         setProcessedData(result);
-        if (result.length > 0) {
-          setHeaders(Object.keys(result[0]));
-        }
-        setStatus({ type: 'success', message: 'Pipeline executed successfully!' });
+        setHeaders(result.length > 0 ? Object.keys(result[0]) : []);
+        setStatus({ type: 'success', message: 'Pipeline executed!' });
       } catch (err) {
-        setStatus({ type: 'error', message: 'Execution Error: ' + err.message });
+        setStatus({ type: 'error', message: err.message });
       } finally {
         setIsProcessing(false);
       }
     }, 400);
   };
 
-  const addConfigStep = () => {
-    setConfig([...config, { id: Date.now().toString(), type: 'RENAME_COLUMN', params: { from: '', to: '' } }]);
-  };
-  
-  const removeConfigStep = (id) => {
-    setConfig(config.filter(c => c.id !== id));
+  const downloadFile = (format) => {
+    if (processedData.length === 0) return;
+    
+    let blob;
+    let fileName = `dataforge_export_${new Date().getTime()}`;
+
+    if (format === 'csv') {
+      if (typeof window.Papa === 'undefined') return;
+      const csv = window.Papa.unparse(processedData);
+      blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      fileName += '.csv';
+    } else if (format === 'json') {
+      const json = JSON.stringify(processedData, null, 2);
+      blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+      fileName += '.json';
+    }
+
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
+  const addConfigStep = () => setConfig([...config, { id: Date.now().toString(), type: 'RENAME_COLUMN', params: {} }]);
+  const removeConfigStep = (id) => setConfig(config.filter(c => c.id !== id));
   const updateStep = (id, field, value) => {
-    setConfig(prev => prev.map(c => {
-      if (c.id === id) {
-        if (field === 'type') {
-          return { ...c, type: value, params: {} };
-        }
-        return { ...c, params: { ...c.params, [field]: value } };
-      }
-      return c;
-    }));
+    setConfig(prev => prev.map(c => c.id === id ? (field === 'type' ? { ...c, type: value, params: {} } : { ...c, params: { ...c.params, [field]: value } }) : c));
   };
 
   return (
     <div className="app-container">
       <style dangerouslySetInnerHTML={{ __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
         :root { 
           --p: #6366f1; 
-          --p-dark: #4f46e5;
+          --p-h: #4f46e5; 
           --bg: #f8fafc; 
-          --c: #ffffff; 
-          --b: #e2e8f0; 
-          --t: #0f172a; 
-          --t-light: #64748b;
-          --s: #10b981; 
-          --e: #ef4444; 
-          --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+          --panel: #ffffff; 
+          --border: #e2e8f0; 
+          --text: #0f172a; 
+          --text-muted: #64748b; 
+          --success: #10b981; 
+          --error: #ef4444; 
+          --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+        }
+
+        body { 
+          margin: 0; 
+          font-family: 'Plus Jakarta Sans', sans-serif; 
+          background: var(--bg); 
+          color: var(--text);
+          -webkit-font-smoothing: antialiased;
+        }
+
+        .app-container { 
+          max-width: 1400px; 
+          margin: 0 auto; 
+          padding: 2rem; 
+          min-height: 100vh; 
         }
         
-        body { margin: 0; font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--t); -webkit-font-smoothing: antialiased; }
-        .app-container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; min-height: 100vh; }
-        
-        /* Layout */
         .header { 
           display: flex; 
           justify-content: space-between; 
           align-items: center; 
-          margin-bottom: 2rem; 
-          background: var(--c); 
-          padding: 1rem 2rem; 
-          border-radius: 16px; 
-          border: 1px solid var(--b); 
+          margin-bottom: 2.5rem; 
+          background: var(--panel); 
+          padding: 1.25rem 2.5rem; 
+          border-radius: 24px; 
+          border: 1px solid var(--border); 
           box-shadow: var(--shadow);
         }
         
-        .logo-section { display: flex; align-items: center; gap: 12px; }
-        .logo-icon { background: var(--p); color: white; padding: 8px; border-radius: 10px; display: flex; align-items: center; }
-        .logo-text h1 { margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: -0.025em; }
-        .logo-text p { margin: 0; font-size: 0.75rem; color: var(--t-light); font-weight: 500; }
+        .logo { display: flex; align-items: center; gap: 14px; }
+        .logo-box { 
+          background: linear-gradient(135deg, var(--p), var(--p-h)); 
+          color: white; 
+          padding: 10px; 
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 8px 16px -4px rgba(99, 102, 241, 0.4);
+        }
+        .logo h1 { margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em; }
         
-        .main-grid { display: grid; grid-template-columns: 380px 1fr; gap: 1.5rem; align-items: start; }
-        @media (max-width: 1024px) { .main-grid { grid-template-columns: 1fr; } }
+        .grid { display: grid; grid-template-columns: 380px 1fr; gap: 2rem; align-items: start; }
+        @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
         
-        /* Cards */
         .card { 
-          background: var(--c); 
-          border-radius: 16px; 
-          border: 1px solid var(--b); 
+          background: var(--panel); 
+          border-radius: 24px; 
+          border: 1px solid var(--border); 
+          overflow: hidden; 
           box-shadow: var(--shadow);
-          overflow: hidden;
-          margin-bottom: 1.5rem;
+          transition: transform 0.2s;
         }
-        .card-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--b); display: flex; justify-content: space-between; align-items: center; }
-        .card-header h3 { margin: 0; font-size: 0.95rem; font-weight: 700; display: flex; align-items: center; gap: 10px; color: #334155; }
-        .card-body { padding: 1.5rem; }
+        .card-h { 
+          padding: 1.25rem 1.5rem; 
+          border-bottom: 1px solid var(--border); 
+          display: flex; 
+          justify-content: space-between; 
+          align-items: center; 
+          font-weight: 700; 
+          font-size: 0.9rem;
+          background: #fcfdfe;
+        }
+        .card-b { padding: 1.5rem; }
 
-        /* Upload Area */
-        .upload-area { 
-          border: 2px dashed var(--b); 
-          padding: 2.5rem 1rem; 
+        .upload-zone { 
+          border: 2px dashed var(--border); 
+          min-height: 160px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
           text-align: center; 
           cursor: pointer; 
+          border-radius: 16px; 
+          transition: all 0.2s ease; 
+          background: #fafbff; 
           position: relative; 
-          border-radius: 12px; 
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          background: #fdfdff;
+          padding: 1rem;
         }
-        .upload-area:hover { border-color: var(--p); background: #f5f3ff; transform: translateY(-2px); }
-        .upload-area input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-        .upload-area-icon { margin-bottom: 12px; color: var(--p); opacity: 0.8; transition: transform 0.2s; }
-        .upload-area:hover .upload-area-icon { transform: scale(1.1); }
-        .upload-area p { margin: 0; font-size: 0.85rem; color: var(--t-light); font-weight: 500; }
-        .file-badge { background: #ecfdf5; color: #059669; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; margin-top: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #d1fae5; }
+        .upload-zone:hover { border-color: var(--p); background: #f5f7ff; }
+        .upload-zone input { position: absolute; opacity: 0; inset: 0; cursor: pointer; width: 100%; height: 100%; }
 
-        /* Steps & Inputs */
         .step-item { 
           background: #f8fafc; 
-          border: 1px solid var(--b); 
-          border-radius: 12px; 
-          margin-bottom: 1rem; 
-          position: relative; 
+          border: 1px solid var(--border); 
+          border-radius: 16px; 
+          margin-bottom: 1.25rem; 
+          overflow: hidden; 
           transition: border-color 0.2s;
         }
         .step-item:hover { border-color: #cbd5e1; }
-        .step-header { display: flex; align-items: center; gap: 8px; padding: 0.75rem 1rem; border-bottom: 1px solid var(--b); background: #ffffff; border-radius: 12px 12px 0 0; }
-        .step-number { width: 20px; height: 20px; background: var(--p); color: white; font-size: 0.7rem; font-weight: 700; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-        .step-content { padding: 1rem; }
+        .step-item-h { 
+          padding: 0.85rem 1.25rem; 
+          border-bottom: 1px solid var(--border); 
+          background: white; 
+          display: flex; 
+          align-items: center; 
+          gap: 12px; 
+          font-size: 0.75rem; 
+          font-weight: 800; 
+          color: var(--text-muted); 
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .step-item-b { padding: 1.25rem; }
         
         select, input { 
           width: 100%; 
-          padding: 0.65rem; 
-          border: 1px solid var(--b); 
-          border-radius: 8px; 
+          padding: 0.75rem 1rem; 
+          border: 1px solid var(--border); 
+          border-radius: 12px; 
           font-size: 0.85rem; 
-          background: white; 
-          font-weight: 500;
-          transition: all 0.2s;
+          outline: none; 
+          transition: all 0.2s; 
+          box-sizing: border-box; 
+          background: #fff;
+          font-family: inherit;
         }
-        select:focus, input:focus { border-color: var(--p); outline: none; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
-        .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+        select:focus, input:focus { 
+          border-color: var(--p); 
+          box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); 
+        }
+        .input-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
 
-        /* Buttons */
-        .btn-primary { 
-          width: 100%; 
-          padding: 0.875rem; 
-          background: var(--p); 
-          color: white; 
-          border: none; 
-          border-radius: 10px; 
-          cursor: pointer; 
+        .btn { 
+          padding: 0.85rem 1.25rem; 
+          border-radius: 14px; 
           font-weight: 700; 
-          font-size: 0.9rem;
+          font-size: 0.9rem; 
+          cursor: pointer; 
           display: flex; 
           align-items: center; 
           justify-content: center; 
           gap: 10px; 
-          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
-          transition: all 0.2s;
+          transition: all 0.2s; 
+          border: none; 
+          font-family: inherit;
         }
-        .btn-primary:hover:not(:disabled) { background: var(--p-dark); transform: translateY(-1px); box-shadow: 0 6px 15px rgba(99, 102, 241, 0.35); }
-        .btn-primary:active:not(:disabled) { transform: translateY(0); }
-        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-primary { 
+          background: linear-gradient(135deg, var(--p), var(--p-h)); 
+          color: white; 
+          width: 100%; 
+          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+        }
+        .btn-primary:hover:not(:disabled) { 
+          transform: translateY(-2px); 
+          box-shadow: 0 6px 20px rgba(99, 102, 241, 0.3);
+        }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
-        .btn-ghost { 
-          padding: 6px 12px; 
+        .btn-secondary { 
           background: #f1f5f9; 
-          border: 1px solid var(--b); 
-          border-radius: 8px; 
-          color: var(--t-light); 
+          color: var(--text-muted); 
           font-size: 0.75rem; 
-          font-weight: 600; 
-          cursor: pointer; 
+          padding: 6px 14px; 
+          border-radius: 10px; 
+        }
+        .btn-secondary:hover { background: #e2e8f0; color: var(--text); }
+        
+        .export-group { display: flex; gap: 8px; }
+        .btn-csv { background: #ecfdf5; color: #059669; border: 1px solid #d1fae5; }
+        .btn-json { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
+
+        .pill { 
+          padding: 8px 16px; 
+          border-radius: 14px; 
+          font-size: 0.8rem; 
+          font-weight: 700; 
           display: flex; 
           align-items: center; 
-          gap: 6px;
-          transition: all 0.2s;
+          gap: 10px; 
+          box-shadow: var(--shadow);
         }
-        .btn-ghost:hover { background: #e2e8f0; color: var(--t); }
+        .pill-success { background: #ecfdf5; color: #065f46; border: 1px solid #d1fae5; }
+        .pill-info { background: #f0f9ff; color: #0369a1; border: 1px solid #e0f2fe; }
+        .pill-error { background: #fef2f2; color: #991b1b; border: 1px solid #fee2e2; }
 
-        .btn-delete { 
-          background: #fff; 
-          border: 1px solid #fee2e2; 
-          color: var(--e); 
-          width: 28px; 
-          height: 28px; 
-          border-radius: 8px; 
-          cursor: pointer; 
-          display: flex; 
-          align-items: center; 
-          justify-content: center;
-          transition: all 0.2s;
-          margin-left: auto;
-        }
-        .btn-delete:hover { background: var(--e); color: white; border-color: var(--e); }
-
-        /* Table */
-        .table-view { height: 750px; display: flex; flex-direction: column; }
-        .table-stats { font-size: 0.75rem; color: var(--t-light); font-weight: 600; background: #f1f5f9; padding: 4px 10px; border-radius: 20px; }
-        .table-container { flex: 1; overflow: auto; background: #ffffff; }
-        table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; }
+        .table-container { height: 750px; display: flex; flex-direction: column; }
+        .table-viewport { flex: 1; overflow: auto; background: #fff; border-radius: 0 0 24px 24px; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; }
         th { 
           background: #f8fafc; 
-          padding: 1rem; 
+          padding: 1.15rem 1.25rem; 
           text-align: left; 
-          font-weight: 700; 
-          color: #475569; 
-          border-bottom: 2px solid var(--b); 
+          border-bottom: 2px solid var(--border); 
           position: sticky; 
           top: 0; 
           z-index: 10; 
           white-space: nowrap; 
+          font-weight: 800;
+          color: var(--text-muted);
           text-transform: uppercase;
-          letter-spacing: 0.025em;
+          font-size: 0.7rem;
+          letter-spacing: 0.05em;
         }
-        td { padding: 0.875rem 1rem; border-bottom: 1px solid #f1f5f9; color: #334155; white-space: nowrap; transition: background 0.1s; }
-        tr:hover td { background: #f9fafb; }
+        td { 
+          padding: 1rem 1.25rem; 
+          border-bottom: 1px solid #f1f5f9; 
+          white-space: nowrap; 
+          font-size: 0.85rem;
+          color: var(--text);
+        }
+        tr:hover td { background: #f8fafc; }
         
-        .empty-state { height: 100%; display: flex; align-items: center; justify-content: center; color: #94a3b8; flex-direction: column; gap: 1rem; opacity: 0.8; }
-        
-        /* Status Pill */
-        .status-pill { padding: 0.5rem 1rem; border-radius: 12px; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-        .status-success { background: #ecfdf5; color: #065f46; border: 1px solid #d1fae5; }
-        .status-error { background: #fef2f2; color: #991b1b; border: 1px solid #fee2e2; }
-        .status-info { background: #eff6ff; color: #1e40af; border: 1px solid #dbeafe; }
+        .empty-state {
+          height: 100%; 
+          display: flex; 
+          align-items: center; 
+          justify-content: center; 
+          flex-direction: column; 
+          gap: 16px;
+          color: var(--text-muted);
+          background: linear-gradient(to bottom, #fff, #f8fafc);
+        }
 
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        .badge {
+          background: var(--p);
+          color: #fff;
+          font-size: 0.65rem;
+          padding: 2px 8px;
+          border-radius: 6px;
+          font-weight: 800;
+        }
+
+        .trash-btn {
+          color: var(--text-muted);
+          transition: color 0.2s;
+          cursor: pointer;
+        }
+        .trash-btn:hover { color: var(--error); }
       `}} />
 
       <header className="header">
-        <div className="logo-section">
-          <div className="logo-icon"><Database size={24} strokeWidth={2.5} /></div>
-          <div className="logo-text">
-            <h1>DataForge</h1>
-            <p>ADVANCED DATA TRANSFORMATION ENGINE</p>
-          </div>
+        <div className="logo">
+          <div className="logo-box"><Zap size={24} fill="white" /></div>
+          <div><h1>DataForge Local</h1></div>
         </div>
-        <div className={`status-pill status-${status.type}`}>
-          {status.type === 'success' ? <CheckCircle2 size={16} /> : status.type === 'error' ? <AlertCircle size={16} /> : <RefreshCw size={16} className={isProcessing ? "spin" : ""} />}
+        <div className={`pill pill-${status.type}`}>
+          {status.type === 'success' ? <CheckCircle2 size={16}/> : status.type === 'error' ? <AlertCircle size={16}/> : <RefreshCw size={16} className={isProcessing ? "spin":""}/>}
           {status.message}
         </div>
       </header>
 
-      <div className="main-grid">
+      <div className="grid">
         <aside>
-          <div className="card">
-            <div className="card-header">
-              <h3><FileSpreadsheet size={18} /> Source File</h3>
+          <div className="card" style={{marginBottom: '1.5rem'}}>
+            <div className="card-h">
+              <div style={{display:'flex', alignItems:'center', gap: '8px'}}>
+                <FileSpreadsheet size={18} />
+                <span>Import Data</span>
+              </div>
             </div>
-            <div className="card-body">
-              <div className="upload-area">
-                <FileUp className="upload-area-icon" size={36} strokeWidth={1.5} />
-                <p>Click or drag your data file here</p>
-                <span style={{fontSize: '0.7rem', display: 'block', marginTop: '6px', opacity: 0.6}}>Supported: .csv, .xlsx, .xls</span>
+            <div className="card-b">
+              <div className="upload-zone">
+                <FileUp size={40} color="var(--p)" style={{marginBottom:'12px', opacity: 0.8}}/>
+                <p style={{margin:0, fontWeight: 700, fontSize: '0.9rem'}}>Drop CSV or Excel</p>
+                <p style={{margin:'4px 0 0', fontSize:'0.75rem', color:'var(--text-muted)'}}>All processing stays in your browser</p>
                 <input type="file" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
               </div>
-              {rawData.length > 0 && (
-                <div style={{textAlign: 'center'}}>
-                  <div className="file-badge">
-                    <CheckCircle2 size={14} /> {rawData.length} Records Loaded
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
           <div className="card">
-            <div className="card-header">
-              <h3><Settings2 size={18} /> Processing Pipeline</h3>
-              <button onClick={addConfigStep} className="btn-ghost"><Plus size={14} /> New Step</button>
+            <div className="card-h">
+              <div style={{display:'flex', alignItems:'center', gap: '8px'}}>
+                <Settings2 size={18} />
+                <span>Pipeline Builder</span>
+              </div>
+              <button className="btn-secondary" onClick={addConfigStep}>
+                <Plus size={14}/> Step
+              </button>
             </div>
-            <div className="card-body">
-              {config.length === 0 && (
-                <div style={{textAlign: 'center', padding: '1rem', color: 'var(--t-light)', fontSize: '0.85rem'}}>
-                  No steps added to the pipeline.
-                </div>
-              )}
-              {config.map((step, index) => (
+            <div className="card-b" style={{maxHeight: '520px', overflowY: 'auto'}}>
+              {config.map((step, idx) => (
                 <div key={step.id} className="step-item">
-                  <div className="step-header">
-                    <div className="step-number">{index + 1}</div>
-                    <span style={{fontSize: '0.75rem', fontWeight: 700, color: '#475569'}}>
-                      {step.type === 'RENAME_COLUMN' ? 'Column Renaming' : 'Uppercase Transform'}
-                    </span>
-                    <button onClick={() => removeConfigStep(step.id)} className="btn-delete" title="Remove step">
-                      <Trash2 size={14} />
-                    </button>
+                  <div className="step-item-h">
+                    <span style={{background:'var(--p)', color:'white', width:20, height:20, borderRadius:'6px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight: 900}}>{idx+1}</span>
+                    <span style={{flex: 1}}>{step.type.replace(/_/g,' ')}</span>
+                    <Trash2 size={16} className="trash-btn" onClick={() => removeConfigStep(step.id)}/>
                   </div>
-                  <div className="step-content">
-                    <select value={step.type} onChange={e => updateStep(step.id, 'type', e.target.value)}>
+                  <div className="step-item-b">
+                    <select 
+                      style={{marginBottom: '0.75rem'}}
+                      value={step.type} 
+                      onChange={e => updateStep(step.id, 'type', e.target.value)}
+                    >
                       <option value="RENAME_COLUMN">Rename Column</option>
-                      <option value="UPPERCASE">Make Uppercase</option>
+                      <option value="UPPERCASE">Uppercase Transform</option>
+                      <option value="FIND_REPLACE">Find & Replace</option>
+                      <option value="DELETE_COLUMN">Remove Column</option>
+                      <option value="PREFIX_SUFFIX">Add Prefix/Suffix</option>
                     </select>
-                    <div className="input-grid">
-                      {step.type === 'RENAME_COLUMN' ? (
+                    
+                    <div className="input-pair">
+                      {step.type === 'RENAME_COLUMN' && (
                         <>
-                          <div>
-                            <label style={{fontSize: '0.65rem', fontWeight: 700, color: 'var(--t-light)', marginBottom: '4px', display: 'block'}}>SOURCE</label>
-                            <input 
-                              placeholder="Column Name" 
-                              value={step.params.from || ''} 
-                              onChange={e => updateStep(step.id, 'from', e.target.value)} 
-                            />
-                          </div>
-                          <div>
-                            <label style={{fontSize: '0.65rem', fontWeight: 700, color: 'var(--t-light)', marginBottom: '4px', display: 'block'}}>TARGET</label>
-                            <input 
-                              placeholder="New Name" 
-                              value={step.params.to || ''} 
-                              onChange={e => updateStep(step.id, 'to', e.target.value)} 
-                            />
-                          </div>
+                          <input placeholder="Source" value={step.params.from || ''} onChange={e => updateStep(step.id, 'from', e.target.value)}/>
+                          <input placeholder="New Name" value={step.params.to || ''} onChange={e => updateStep(step.id, 'to', e.target.value)}/>
                         </>
-                      ) : (
-                        <div style={{gridColumn: 'span 2'}}>
-                          <label style={{fontSize: '0.65rem', fontWeight: 700, color: 'var(--t-light)', marginBottom: '4px', display: 'block'}}>TARGET COLUMN</label>
-                          <input 
-                            placeholder="Target Column Name" 
-                            value={step.params.column || ''} 
-                            onChange={e => updateStep(step.id, 'column', e.target.value)} 
-                          />
-                        </div>
+                      )}
+                      {step.type === 'FIND_REPLACE' && (
+                        <>
+                          <input style={{gridColumn:'span 2', marginBottom:'5px'}} placeholder="Column Name" value={step.params.column || ''} onChange={e => updateStep(step.id, 'column', e.target.value)}/>
+                          <input placeholder="Find" value={step.params.find || ''} onChange={e => updateStep(step.id, 'find', e.target.value)}/>
+                          <input placeholder="Replace" value={step.params.replace || ''} onChange={e => updateStep(step.id, 'replace', e.target.value)}/>
+                        </>
+                      )}
+                      {(step.type === 'UPPERCASE' || step.type === 'DELETE_COLUMN') && (
+                        <input style={{gridColumn:'span 2'}} placeholder="Column Name" value={step.params.column || ''} onChange={e => updateStep(step.id, 'column', e.target.value)}/>
+                      )}
+                      {step.type === 'PREFIX_SUFFIX' && (
+                        <>
+                          <input style={{gridColumn:'span 2', marginBottom:'5px'}} placeholder="Column Name" value={step.params.column || ''} onChange={e => updateStep(step.id, 'column', e.target.value)}/>
+                          <input placeholder="Prefix" value={step.params.prefix || ''} onChange={e => updateStep(step.id, 'prefix', e.target.value)}/>
+                          <input placeholder="Suffix" value={step.params.suffix || ''} onChange={e => updateStep(step.id, 'suffix', e.target.value)}/>
+                        </>
                       )}
                     </div>
                   </div>
                 </div>
               ))}
-              
-              <button 
-                className="btn-primary" 
-                onClick={runPipeline} 
-                disabled={isProcessing || rawData.length === 0}
-                style={{marginTop: '1rem'}}
-              >
-                {isProcessing ? <Loader2 size={18} className="spin" /> : <Play size={18} fill="currentColor"/>} 
-                <span>Execute Pipeline</span>
+              <button className="btn btn-primary" onClick={runPipeline} disabled={isProcessing || rawData.length === 0}>
+                {isProcessing ? <Loader2 size={18} className="spin"/> : <Play size={18} fill="currentColor"/>}
+                Process Pipeline
               </button>
             </div>
           </div>
         </aside>
 
-        <section className="card table-view">
-          <div className="card-header">
-            <h3><TableIcon size={18} /> Data Preview</h3>
+        <section className="card table-container">
+          <div className="card-h">
+            <div style={{display:'flex', alignItems:'center', gap: '8px'}}>
+              <TableIcon size={18} style={{color: 'var(--text-muted)'}}/> 
+              <span>Data Workbench</span>
+              {processedData.length > 0 && <span className="badge">{processedData.length.toLocaleString()} Rows</span>}
+            </div>
             {processedData.length > 0 && (
-              <div className="table-stats">
-                {processedData.length} records processed
+              <div className="export-group">
+                <button className="btn btn-secondary btn-csv" onClick={() => downloadFile('csv')}>
+                  <FileType size={14}/> CSV
+                </button>
+                <button className="btn btn-secondary btn-json" onClick={() => downloadFile('json')}>
+                  <FileJson size={14}/> JSON
+                </button>
               </div>
             )}
           </div>
-          <div className="table-container">
+          <div className="table-viewport">
             {processedData.length > 0 ? (
               <table>
                 <thead>
-                  <tr>
-                    {headers.map(h => <th key={h}>{h}</th>)}
-                  </tr>
+                  <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {processedData.slice(0, 50).map((row, i) => (
-                    <tr key={i}>
-                      {headers.map(h => <td key={`${i}-${h}`}>{String(row[h] ?? '')}</td>)}
-                    </tr>
+                  {processedData.slice(0, 100).map((row, i) => (
+                    <tr key={i}>{headers.map(h => <td key={h}>{String(row[h] ?? '')}</td>)}</tr>
                   ))}
                 </tbody>
               </table>
             ) : (
               <div className="empty-state">
-                <Database size={64} strokeWidth={1} style={{color: '#e2e8f0'}} />
-                <h4 style={{margin: 0, color: '#475569'}}>No active dataset</h4>
-                <p style={{margin: 0, fontSize: '0.85rem', maxWidth: '300px'}}>Upload a file and execute your processing pipeline to see results here.</p>
+                <div style={{background: '#f1f5f9', padding: '32px', borderRadius: '50%', marginBottom: '12px'}}>
+                  <Database size={56} strokeWidth={1} style={{opacity:0.4}}/>
+                </div>
+                <h3 style={{margin:0, fontSize:'1.1rem', fontWeight: 800}}>Workbench Ready</h3>
+                <p style={{margin: 0, fontSize:'0.85rem', maxWidth: '280px', textAlign:'center'}}>
+                  Upload a dataset to start building your automated transformation pipeline.
+                </p>
               </div>
             )}
           </div>
-          {processedData.length > 50 && (
-            <div style={{padding: '0.75rem', textAlign: 'center', background: '#f8fafc', borderTop: '1px solid var(--b)', fontSize: '0.75rem', color: 'var(--t-light)', fontWeight: 600}}>
-              Displaying first 50 records only for preview.
-            </div>
-          )}
         </section>
       </div>
     </div>
